@@ -19,7 +19,7 @@ def main(args):
                           of this file). Their value can be accessed as "args.argument".
     """
     ## 1. First, we load our data and flatten the images into vectors
-    xtrain, xtest, ytrain = load_data(args.data_path)
+    xtrain, xtest, ytrain = load_data(args.data)
     xtrain = xtrain.reshape(xtrain.shape[0], -1)
     xtest = xtest.reshape(xtest.shape[0], -1)
 
@@ -51,6 +51,8 @@ def main(args):
     if args.nn_type == "mlp":
         model = ... ### WRITE YOUR CODE HERE
 
+    if args.nn_type == "cnn":
+        model = CNN(1,n_classes)
     summary(model)
 
     # Trainer object

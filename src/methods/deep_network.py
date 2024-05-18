@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 
 ## MS2
-
+import torch.optim as optim
 
 class MLP(nn.Module):
     """
@@ -56,7 +56,7 @@ class CNN(nn.Module):
     It should use at least one convolutional layer.
     """
 
-    def __init__(self, input_channels, n_classes):
+    def __init__(self, input_channels, n_classes,image_size=(28,28)):
         """
         Initialize the network.
         
@@ -67,13 +67,42 @@ class CNN(nn.Module):
             input_channels (int): number of channels in the input
             n_classes (int): number of classes to predict
         """
-        super().__init__()
+        super(CNN,self).__init__()
+        self.input_channels = input_channels
+        self.image_size = image_size
+
+        # Define the convolutional layers
+        self.conv1 = nn.Conv2d(input_channels, 32, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
+        
+        # Define the max pooling layer
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        # Calculate the size of the feature map after convolutional and pooling layers
+        self.feature_map_size = self._get_feature_map_size()
+
+        # Define the fully connected layers
+        self.fc1 = nn.Linear(128 * self.feature_map_size[0] * self.feature_map_size[1], 512)
+        self.fc2 = nn.Linear(512, n_classes)
+        
+        # Dropout layer to prevent overfitting
+        self.dropout = nn.Dropout(0.5)
         ##
         ###
         #### WRITE YOUR CODE HERE!
         ###
         ##
-
+        
+    def _get_feature_map_size(self):
+        # Create a dummy tensor with the input shape to calculate the size of the feature map
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, self.input_channels, *self.image_size)
+            x = self.pool(F.relu(self.conv1(dummy_input)))
+            x = self.pool(F.relu(self.conv2(x)))
+            x = self.pool(F.relu(self.conv3(x)))
+        return x.shape[2], x.shape[3]
+    
     def forward(self, x):
         """
         Predict the class of a batch of samples with the model.
@@ -89,6 +118,29 @@ class CNN(nn.Module):
         #### WRITE YOUR CODE HERE!
         ###
         ##
+        
+        # Reshape the input tensor to (N, input_channels, H, W)
+        x = x.view(-1, self.input_channels, *self.image_size)
+
+        # Apply first convolutional layer, then ReLU activation and pooling
+        x = self.pool(F.relu(self.conv1(x)))
+        
+        # Apply second convolutional layer, then ReLU activation and pooling
+        x = self.pool(F.relu(self.conv2(x)))
+        
+        # Apply third convolutional layer, then ReLU activation and pooling
+        x = self.pool(F.relu(self.conv3(x)))
+        
+        # Flatten the tensor for the fully connected layer
+        x = x.view(x.size(0), -1)
+        
+        # Apply first fully connected layer with dropout and ReLU activation
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        
+        # Apply second fully connected layer
+        preds = self.fc2(x)
+        
         return preds
 
 
@@ -150,7 +202,7 @@ class Trainer(object):
         self.batch_size = batch_size
 
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = ...  ### WRITE YOUR CODE HERE
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)  ### WRITE YOUR CODE HERE
 
     def train_all(self, dataloader):
         """
@@ -163,7 +215,7 @@ class Trainer(object):
             dataloader (DataLoader): dataloader for training data
         """
         for ep in range(self.epochs):
-            self.train_one_epoch(dataloader)
+            self.train_one_epoch(dataloader,ep)
 
             ### WRITE YOUR CODE HERE if you want to do add something else at each epoch
 
@@ -177,6 +229,17 @@ class Trainer(object):
         Arguments:
             dataloader (DataLoader): dataloader for training data
         """
+        self.model.train()
+        for batch_idx, (data, target) in enumerate(dataloader):
+            self.optimizer.zero_grad()
+            output = self.model(data)
+            loss = self.criterion(output, target)
+            loss.backward()
+            self.optimizer.step()
+            if batch_idx % 10 == 0:
+                print(f'Epoch: {ep} [{batch_idx * len(data)}/{len(dataloader.dataset)}'
+                      f' ({100. * batch_idx / len(dataloader):.0f}%)]\tLoss: {loss.item():.6f}')
+
         ##
         ###
         #### WRITE YOUR CODE HERE!
@@ -205,6 +268,14 @@ class Trainer(object):
         #### WRITE YOUR CODE HERE!
         ###
         ##
+        self.model.eval()
+        pred_labels = []
+        with torch.no_grad():
+            for data in dataloader:
+                outputs = self.model(data[0])
+                _, predicted = torch.max(outputs.data, 1)
+                pred_labels.append(predicted)
+        pred_labels = torch.cat(pred_labels)
         return pred_labels
     
     def fit(self, training_data, training_labels):
@@ -222,7 +293,7 @@ class Trainer(object):
 
         # First, prepare data for pytorch
         train_dataset = TensorDataset(torch.from_numpy(training_data).float(), 
-                                      torch.from_numpy(training_labels))
+                                      torch.from_numpy(training_labels).long())
         train_dataloader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         
         self.train_all(train_dataloader)
