@@ -1,11 +1,11 @@
 import argparse
 
 import numpy as np
-from torchinfo import summary
+# from torchinfo import summary
 
 from src.data import load_data
 from src.methods.pca import PCA
-from src.methods.deep_network import MLP, CNN, Trainer, MyViT
+from src.methods.deep_network import MLP, CNN, Trainer, ViT, split_train_val
 from src.utils import normalize_fn, append_bias_term, accuracy_fn, macrof1_fn, get_n_classes
 
 
@@ -25,14 +25,18 @@ def main(args):
 
     ## 2. Then we must prepare it. This is were you can create a validation set,
     #  normalize, add bias, etc.
-
     # Make a validation set
     if not args.test:
     ### WRITE YOUR CODE HERE
         print("Using PCA")
 
     ### WRITE YOUR CODE HERE to do any other data processing
-
+    means = np.mean(xtrain, axis=0)
+    stds = np.std(xtrain, axis=0) + 1e-10  # Add a small constant to prevent division by zero
+    # Normalize the training and testing data
+    xtrain = normalize_fn(xtrain, means, stds)
+    xtest = normalize_fn(xtest, means, stds)
+    xtrain, ytrain, xval, yval = split_train_val(xtrain, ytrain)
 
     # Dimensionality reduction (MS2)
     if args.use_pca:
@@ -53,31 +57,37 @@ def main(args):
 
     if args.nn_type == "cnn":
         model = CNN(1,n_classes)
-    summary(model)
+    
+    if args.nn_type == "transformer":
+        model = ViT((1, 28, 28), n_classes, args.device)
+    # summary(model)
 
     # Trainer object
-    method_obj = Trainer(model, lr=args.lr, epochs=args.max_iters, batch_size=args.nn_batch_size)
+    method_obj = Trainer(model, lr=args.lr, epochs=args.max_iters, batch_size=args.nn_batch_size, device=args.device)
 
-
+    # print(xtrain.shape, ytrain.shape, xval.shape, yval.shape)
     ## 4. Train and evaluate the method
-
     # Fit (:=train) the method on the training data
     preds_train = method_obj.fit(xtrain, ytrain)
 
     # Predict on unseen data
-    preds = method_obj.predict(xtest)
+    preds = method_obj.predict(xval)
 
     ## Report results: performance on train and valid/test sets
     acc = accuracy_fn(preds_train, ytrain)
     macrof1 = macrof1_fn(preds_train, ytrain)
     print(f"\nTrain set: accuracy = {acc:.3f}% - F1-score = {macrof1:.6f}")
+    
+    acc = accuracy_fn(preds, yval)
+    macrof1 = macrof1_fn(preds, yval)
+    print(f"Test set:  accuracy = {acc:.3f}% - F1-score = {macrof1:.6f}")
 
 
     ## As there are no test dataset labels, check your model accuracy on validation dataset.
     # You can check your model performance on test set by submitting your test set predictions on the AIcrowd competition.
-    acc = accuracy_fn(preds, xtest)
-    macrof1 = macrof1_fn(preds, xtest)
-    print(f"Validation set:  accuracy = {acc:.3f}% - F1-score = {macrof1:.6f}")
+    # acc = accuracy_fn(preds, xtest)
+    # macrof1 = macrof1_fn(preds, xtest)
+    # print(f"Validation set:  accuracy = {acc:.3f}% - F1-score = {macrof1:.6f}")
 
 
     ### WRITE YOUR CODE HERE if you want to add other outputs, visualization, etc.
@@ -98,7 +108,6 @@ if __name__ == '__main__':
                         help="Device to use for the training, it can be 'cpu' | 'cuda' | 'mps'")
     parser.add_argument('--use_pca', action="store_true", help="use PCA for feature reduction")
     parser.add_argument('--pca_d', type=int, default=100, help="the number of principal components")
-
 
     parser.add_argument('--lr', type=float, default=1e-5, help="learning rate for methods with learning rate")
     parser.add_argument('--max_iters', type=int, default=100, help="max iters for methods which are iterative")

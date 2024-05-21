@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -88,11 +89,6 @@ class CNN(nn.Module):
         
         # Dropout layer to prevent overfitting
         self.dropout = nn.Dropout(0.5)
-        ##
-        ###
-        #### WRITE YOUR CODE HERE!
-        ###
-        ##
         
     def _get_feature_map_size(self):
         # Create a dummy tensor with the input shape to calculate the size of the feature map
@@ -112,13 +108,7 @@ class CNN(nn.Module):
         Returns:
             preds (tensor): logits of predictions of shape (N, C)
                 Reminder: logits are value pre-softmax.
-        """
-        ##
-        ###
-        #### WRITE YOUR CODE HERE!
-        ###
-        ##
-        
+        """      
         # Reshape the input tensor to (N, input_channels, H, W)
         x = x.view(-1, self.input_channels, *self.image_size)
 
@@ -143,24 +133,135 @@ class CNN(nn.Module):
         
         return preds
 
+class MSA(nn.Module):
+    def __init__(self, d, n_heads=2):
+        super(MSA, self).__init__()
+        self.d = d
+        self.n_heads = n_heads
 
-class MyViT(nn.Module):
+        assert d % n_heads == 0, f"Can't divide dimension {d} into {n_heads} heads"
+        d_head = int(d / n_heads)
+        self.d_head = d_head
+
+        self.q_mappings = nn.ModuleList([nn.Linear(d_head, d_head) for _ in range(self.n_heads)])
+        self.k_mappings = nn.ModuleList([nn.Linear(d_head, d_head) for _ in range(self.n_heads)])
+        self.v_mappings = nn.ModuleList([nn.Linear(d_head, d_head) for _ in range(self.n_heads)])
+
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, sequences):
+        result = []
+        for sequence in sequences:
+            seq_result = []
+            for head in range(self.n_heads):
+
+                # Select the mapping associated to the given head.
+                q_mapping = self.q_mappings[head]
+                k_mapping = self.k_mappings[head]
+                v_mapping = self.v_mappings[head]
+
+                seq = sequence[:, head * self.d_head: (head + 1) * self.d_head]
+
+                # Map seq to q, k, v.
+                q, k, v = q_mapping(seq), k_mapping(seq), v_mapping(seq)
+
+                attention = self.softmax(q @ k.T) / np.sqrt(self.d)                
+                seq_result.append(attention @ v)
+            result.append(torch.hstack(seq_result))
+        return torch.cat([torch.unsqueeze(r, dim=0) for r in result])
+
+class ViTBlock(nn.Module):
+    def __init__(self, hidden_d, n_heads, mlp_ratio=4):
+        super(ViTBlock, self).__init__()
+        self.hidden_d = hidden_d
+        self.n_heads = n_heads
+
+        self.norm1 = nn.LayerNorm(hidden_d)
+        self.mhsa = MSA(hidden_d, n_heads)
+        self.norm2 = nn.LayerNorm(hidden_d)
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_d, mlp_ratio * hidden_d),
+            nn.GELU(),
+            nn.Linear(mlp_ratio * hidden_d, hidden_d)
+        )
+
+    def forward(self, x):
+        # MHSA + residual connection.
+        out = x + self.mhsa(self.norm1(x))
+        # Feedforward + residual connection
+        out = out + self.mlp(self.norm2(out))
+        return out
+
+class ViT(nn.Module):
     """
     A Transformer-based neural network
     """
-
-    def __init__(self, chw, n_patches, n_blocks, hidden_d, n_heads, out_d):
+    def __init__(self, chw, n_classes, device, n_patches=7, n_blocks=2, hidden_d=8, n_heads=2):
         """
         Initialize the network.
-        
-        """
-        super().__init__()
-        ##
-        ###
-        #### WRITE YOUR CODE HERE!
-        ###
-        ##
+        """        
+        super(ViT, self).__init__()
 
+        self.chw = chw # (C, H, W)
+        self.n_patches = n_patches
+        self.n_blocks = n_blocks
+        self.n_heads = n_heads
+        self.hidden_d = hidden_d
+        self.device = device
+        
+        # Input and patches sizes
+        assert chw[1] % n_patches == 0 # Input shape must be divisible by number of patches
+        assert chw[2] % n_patches == 0
+        self.patch_size = (chw[1] / n_patches, chw[2] / n_patches)
+
+        # Linear mapper
+        self.input_d = int(chw[0] * self.patch_size[0] * self.patch_size[1])
+        self.linear_mapper = nn.Linear(self.input_d, self.hidden_d)
+
+        # Learnable classification token
+        self.class_token = nn.Parameter(torch.rand(1, self.hidden_d))
+
+        # Positional embedding
+        # HINT: don't forget the classification token
+        self.positional_embeddings = self.get_positional_embeddings(n_patches ** 2 + 1, hidden_d)
+
+        # Transformer blocks
+        self.blocks = nn.ModuleList([ViTBlock(hidden_d, n_heads) for _ in range(n_blocks)])
+
+        # Classification MLP
+        self.mlp = nn.Sequential(
+            nn.Linear(self.hidden_d, n_classes),
+            nn.Softmax(dim=-1)
+        )
+    
+    def patchify(self, images, n_patches):
+        n, c, h, w = images.shape
+        assert h == w # We assume square image.
+        patches = torch.zeros(n, n_patches ** 2, h * w * c // n_patches ** 2)
+        patch_size = h // n_patches
+
+        for idx, image in enumerate(images):
+            for i in range(n_patches):
+                for j in range(n_patches):
+                    # Extract the patch of the image.
+                    patch = image[:, i * patch_size: (i + 1) * patch_size, j * patch_size: (j + 1) * patch_size]
+                    # Flatten the patch and store it.
+                    patches[idx, i * n_patches + j] = patch.flatten()
+        return patches
+    
+    def get_positional_embeddings(self, sequence_length, d):
+        """
+        Get the positional embeddings for a given sequence length and hidden size.
+        """
+        result = torch.ones(sequence_length, d)
+        for i in range(sequence_length):
+            for j in range(d):
+                if j % 2 == 0:
+                    result[i, j] = np.sin(i / 10000 ** (j / d))
+                else:
+                    result[i, j] = np.cos(i / 10000 ** (j / d))
+        return result
+    
     def forward(self, x):
         """
         Predict the class of a batch of samples with the model.
@@ -171,12 +272,32 @@ class MyViT(nn.Module):
             preds (tensor): logits of predictions of shape (N, C)
                 Reminder: logits are value pre-softmax.
         """
-        ##
-        ###
-        #### WRITE YOUR CODE HERE!
-        ###
-        ##
-        return preds
+        x = x.view(-1, *self.chw)
+        n, c, h, w = x.shape
+        # Divide images into patches.
+        patches = self.patchify(x, self.n_patches).to(self.device)
+        
+        # Map the vector corresponding to each patch to the hidden size dimension.
+        tokens = self.linear_mapper(patches) ### WRITE YOUR CODE HERE
+
+        # Add classification token to the tokens.
+        tokens = torch.cat((self.class_token.expand(n, 1, -1), tokens), dim=1)
+
+        # Add positional embedding.
+        # HINT: use torch.Tensor.repeat(...)
+        out = tokens + self.positional_embeddings.unsqueeze(0).repeat(n, 1, 1).to(self.device)
+
+        # Transformer Blocks
+        for block in self.blocks:
+            out = block(out)
+
+        # Get the classification token only.
+        out = out[:, 0]
+
+        # Map to the output distribution.
+        out = self.mlp(out)
+
+        return out
 
 
 class Trainer(object):
@@ -186,7 +307,7 @@ class Trainer(object):
     It will also serve as an interface between numpy and pytorch.
     """
 
-    def __init__(self, model, lr, epochs, batch_size):
+    def __init__(self, model, lr, epochs, batch_size, device):
         """
         Initialize the trainer object for a given model.
 
@@ -198,9 +319,10 @@ class Trainer(object):
         """
         self.lr = lr
         self.epochs = epochs
-        self.model = model
+        self.model = model.to(device)
         self.batch_size = batch_size
-
+        self.device = device
+        
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)  ### WRITE YOUR CODE HERE
 
@@ -217,7 +339,6 @@ class Trainer(object):
         for ep in range(self.epochs):
             self.train_one_epoch(dataloader,ep)
 
-            ### WRITE YOUR CODE HERE if you want to do add something else at each epoch
 
     def train_one_epoch(self, dataloader, ep):
         """
@@ -231,7 +352,10 @@ class Trainer(object):
         """
         self.model.train()
         for batch_idx, (data, target) in enumerate(dataloader):
+
             self.optimizer.zero_grad()
+            data, target = data.to(self.device), target.to(self.device)
+
             output = self.model(data)
             loss = self.criterion(output, target)
             loss.backward()
@@ -239,12 +363,11 @@ class Trainer(object):
             if batch_idx % 10 == 0:
                 print(f'Epoch: {ep} [{batch_idx * len(data)}/{len(dataloader.dataset)}'
                       f' ({100. * batch_idx / len(dataloader):.0f}%)]\tLoss: {loss.item():.6f}')
+            # if batch_idx % 20 == 0:
+            #     loss_dict.append(loss.item())
+            # if (ep+1) % 5 == 0:
+            #     torch.save(self.model.state_dict(), f'checkpoint/model_ep{ep}.pth')
 
-        ##
-        ###
-        #### WRITE YOUR CODE HERE!
-        ###
-        ##
 
     def predict_torch(self, dataloader):
         """
@@ -263,11 +386,6 @@ class Trainer(object):
             pred_labels (torch.tensor): predicted labels of shape (N,),
                 with N the number of data points in the validation/test data.
         """
-        ##
-        ###
-        #### WRITE YOUR CODE HERE!
-        ###
-        ##
         self.model.eval()
         pred_labels = []
         with torch.no_grad():
@@ -319,3 +437,20 @@ class Trainer(object):
 
         # We return the labels after transforming them into numpy array.
         return pred_labels.cpu().numpy()
+    
+
+def split_train_val(xtrain, ytrain, val_ratio=0.1):
+    np.random.seed(42)
+    N = xtrain.shape[0]
+    Nval = int(N*val_ratio)
+    indices = np.arange(xtrain.shape[0])
+    np.random.shuffle(indices)
+
+    xtrain = xtrain[indices]
+    ytrain = ytrain[indices]
+    xval = xtrain[:Nval]
+    yval = ytrain[:Nval]
+    xtrain = xtrain[Nval:]
+    ytrain = ytrain[Nval:]
+    
+    return xtrain, ytrain, xval, yval
