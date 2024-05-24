@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 ## MS2
 
@@ -43,6 +44,20 @@ class PCA(object):
         #### WRITE YOUR CODE HERE!
         ###
         ##
+        self.mean = np.mean(training_data, axis=0)
+        X_tilde = training_data - self.mean
+        C = np.cov(X_tilde.T)
+
+        eigvals, eigvecs = np.linalg.eigh(C)
+
+        sorted_idx = np.argsort(eigvals[::-1])
+        eigvals = eigvals[sorted_idx]
+        eigvecs = eigvecs[:, sorted_idx]
+
+        self.W = eigvecs[:, :self.d]
+
+        exvar = (np.sum(eigvals[:self.d]) / np.sum(eigvals)) * 100
+
         return exvar
 
     def reduce_dimension(self, data):
@@ -59,6 +74,9 @@ class PCA(object):
         #### WRITE YOUR CODE HERE!
         ###
         ##
+
+        centered_data = data - self.mean
+        data_reduced = np.dot(centered_data, self.W)
         return data_reduced
         
 
