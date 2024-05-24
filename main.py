@@ -66,11 +66,9 @@ def main(args):
     
     if args.nn_type == "transformer":
         model = MyViT((1, 28, 28), n_classes=n_classes)
-        model = MyViT((1, 28, 28), n_classes, args.device)
     # summary(model)
 
     # Trainer object
-    method_obj = Trainer(model, lr=args.lr, epochs=args.max_iters, batch_size=args.nn_batch_size)
     method_obj = Trainer(model, lr=args.lr, epochs=args.max_iters, batch_size=args.nn_batch_size)
 
     # print(xtrain.shape, ytrain.shape, xval.shape, yval.shape)
