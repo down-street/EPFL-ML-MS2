@@ -149,7 +149,7 @@ class MSA(nn.Module):
         self.d = d
         self.n_heads = n_heads
 
-        assert d % n_heads == 0, f"Can't divide dimension {d} into {n_heads} heads"
+        # assert d % n_heads == 0, f"Can't divide dimension {d} into {n_heads} heads"
         d_head = int(d / n_heads)
         self.d_head = d_head
 
@@ -202,22 +202,21 @@ class ViTBlock(nn.Module):
         out = out + self.mlp(self.norm2(out))
         return out
 
-class ViT(nn.Module):
+class MyViT(nn.Module):
     """
     A Transformer-based neural network
     """
-    def __init__(self, chw, n_classes, device, n_patches=7, n_blocks=2, hidden_d=8, n_heads=2):
+    def __init__(self, chw, n_patches=7, n_blocks=2, hidden_d=8, n_heads=2, n_classes=10):
         """
         Initialize the network.
         """        
-        super(ViT, self).__init__()
+        super(MyViT, self).__init__()
 
         self.chw = chw # (C, H, W)
         self.n_patches = n_patches
         self.n_blocks = n_blocks
         self.n_heads = n_heads
         self.hidden_d = hidden_d
-        self.device = device
         
         # Input and patches sizes
         assert chw[1] % n_patches == 0 # Input shape must be divisible by number of patches
@@ -285,7 +284,7 @@ class ViT(nn.Module):
         x = x.view(-1, *self.chw)
         n, c, h, w = x.shape
         # Divide images into patches.
-        patches = self.patchify(x, self.n_patches).to(self.device)
+        patches = self.patchify(x, self.n_patches)
         
         # Map the vector corresponding to each patch to the hidden size dimension.
         tokens = self.linear_mapper(patches) ### WRITE YOUR CODE HERE
@@ -295,7 +294,7 @@ class ViT(nn.Module):
 
         # Add positional embedding.
         # HINT: use torch.Tensor.repeat(...)
-        out = tokens + self.positional_embeddings.unsqueeze(0).repeat(n, 1, 1).to(self.device)
+        out = tokens + self.positional_embeddings.unsqueeze(0).repeat(n, 1, 1)
 
         # Transformer Blocks
         for block in self.blocks:
@@ -317,7 +316,7 @@ class Trainer(object):
     It will also serve as an interface between numpy and pytorch.
     """
 
-    def __init__(self, model, lr, epochs, batch_size, device):
+    def __init__(self, model, lr, epochs, batch_size):
         """
         Initialize the trainer object for a given model.
 
@@ -329,9 +328,8 @@ class Trainer(object):
         """
         self.lr = lr
         self.epochs = epochs
-        self.model = model.to(device)
+        self.model = model
         self.batch_size = batch_size
-        self.device = device
         
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)  ### WRITE YOUR CODE HERE
@@ -364,7 +362,6 @@ class Trainer(object):
         for batch_idx, (data, target) in enumerate(dataloader):
 
             self.optimizer.zero_grad()
-            data, target = data.to(self.device), target.to(self.device)
 
             output = self.model(data)
             loss = self.criterion(output, target)

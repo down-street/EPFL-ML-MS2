@@ -5,7 +5,7 @@ import numpy as np
 
 from src.data import load_data
 from src.methods.pca import PCA
-from src.methods.deep_network import MLP, CNN, Trainer, ViT, split_train_val
+from src.methods.deep_network import MLP, CNN, Trainer, MyViT, split_train_val
 from src.utils import normalize_fn, append_bias_term, accuracy_fn, macrof1_fn, get_n_classes
 
 
@@ -64,11 +64,11 @@ def main(args):
         model = CNN(1,n_classes)
     
     if args.nn_type == "transformer":
-        model = ViT((1, 28, 28), n_classes, args.device)
+        model = MyViT((1, 28, 28), n_classes=n_classes)
     # summary(model)
 
     # Trainer object
-    method_obj = Trainer(model, lr=args.lr, epochs=args.max_iters, batch_size=args.nn_batch_size, device=args.device)
+    method_obj = Trainer(model, lr=args.lr, epochs=args.max_iters, batch_size=args.nn_batch_size)
 
     # print(xtrain.shape, ytrain.shape, xval.shape, yval.shape)
     ## 4. Train and evaluate the method
